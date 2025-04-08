@@ -25,21 +25,3 @@ sudo ./install_epwa_flight_etl.sh
 After successful installation, access the Airflow web UI at:  
 **http://<your_vm_ip>:8080**
 ```
-
----
-
-### 📦 Jak połączyć z repo `epwa-flight-etl`?
-
-W `README.md` możesz dodać link do GitHub Releases z `.zip` archiwum:
-```markdown
-Download the ZIP archive:  
-https://github.com/mkonefal2/epwa-flight-etl/releases
-```
-
----
-
-### 🚀 Publikacja
-
-1. Załóż nowe repo na GitHub: `airflow-flight-installer`
-2. Wrzucaj tam **tylko ten skrypt** i dokumentację
-3. W `epwa-flight-etl` dodaj link w README do instalatora
