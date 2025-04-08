@@ -11,19 +11,20 @@ AIRFLOW_HOME="$INSTALL_DIR/airflow"
 VENV_DIR="$INSTALL_DIR/venv"
 PYTHON_VERSION="python3.10"
 
-# Display installation phase
-echo "[1/9] Updating system and installing dependencies..."
+echo "[1/10] Updating system and installing dependencies..."
 sudo apt update
-sudo apt install -y python3-pip python3-venv unzip
+sudo apt install -y python3-pip python3-venv unzip openjdk-17-jdk
 
-# Create airflow user if not exists
-echo "[2/9] Creating airflow user if not present..."
+# Set JAVA_HOME path
+JAVA_PATH=$(dirname $(dirname $(readlink -f $(which javac))))
+echo "JAVA_HOME will be set to: $JAVA_PATH"
+
+echo "[2/10] Creating airflow user if not present..."
 if ! id -u "$USER" > /dev/null 2>&1; then
   sudo useradd -m -s /bin/bash "$USER"
 fi
 
-# Remove previous installation if exists
-echo "[3/9] Removing previous installation if it exists..."
+echo "[3/10] Cleaning old installation..."
 sudo systemctl stop airflow-webserver 2>/dev/null
 sudo systemctl stop airflow-scheduler 2>/dev/null
 sudo systemctl disable airflow-webserver 2>/dev/null
@@ -32,8 +33,7 @@ sudo rm -f /etc/systemd/system/airflow-webserver.service
 sudo rm -f /etc/systemd/system/airflow-scheduler.service
 sudo rm -rf "$INSTALL_DIR"
 
-# Check if the ZIP file exists
-echo "[4/9] Extracting the ZIP project archive..."
+echo "[4/10] Extracting ZIP archive..."
 if [[ ! -f "$ZIP_FILE" ]]; then
   echo "❌ ZIP file $ZIP_FILE not found. Please place it in the same directory."
   exit 1
@@ -43,48 +43,47 @@ unzip -q "$ZIP_FILE"
 mv "$EXTRACTED_DIR" "$INSTALL_DIR"
 sudo chown -R "$USER:$USER" "$INSTALL_DIR"
 
-# Set AIRFLOW_HOME globally
-echo "[5/9] Setting environment variable AIRFLOW_HOME..."
+echo "[4.1/10] Creating .env file for API key..."
+read -p "🔑 Enter your AviationStack API key: " API_KEY
+ENV_FILE="$INSTALL_DIR/.env"
+sudo -u "$USER" tee "$ENV_FILE" > /dev/null <<EOF
+AVIATIONSTACK_API_KEY=$API_KEY
+EOF
+echo "✅ .env file created at $ENV_FILE"
+
+echo "[5/10] Setting environment variable AIRFLOW_HOME..."
 echo "export AIRFLOW_HOME=$AIRFLOW_HOME" | sudo tee /etc/profile.d/airflow.sh
+echo "export JAVA_HOME=$JAVA_PATH" | sudo tee /etc/profile.d/java.sh
 source /etc/profile.d/airflow.sh
+source /etc/profile.d/java.sh
 
-# Create Airflow directories
-echo "[6/9] Creating Airflow directories..."
+echo "[6/10] Creating Airflow directories..."
 sudo -u "$USER" mkdir -p "$AIRFLOW_HOME"/{dags,logs,plugins}
+sudo -u "$USER" mkdir -p "$INSTALL_DIR/db"
 
-# Create and activate virtual environment
-echo "[7/9] Creating and activating virtual environment..."
+echo "[7/10] Creating and activating virtual environment..."
 sudo -u "$USER" $PYTHON_VERSION -m venv "$VENV_DIR"
 source "$VENV_DIR/bin/activate"
 
-# Install requirements
-echo "[8/9] Installing Python packages from requirements.txt..."
-if ! pip install --upgrade pip setuptools wheel; then
-  echo "❌ Failed to upgrade pip/setuptools/wheel."
-  exit 1
-fi
+echo "[8/10] Installing Python dependencies..."
+pip install --upgrade pip setuptools wheel
+pip install -r "$INSTALL_DIR/requirements.txt"
 
-if ! pip install -r "$INSTALL_DIR/requirements.txt"; then
-  echo "❌ Failed to install requirements. Check requirements.txt for conflicts."
-  exit 1
-fi
-
-# Initialize Airflow database
-airflow db migrate || { echo "❌ Failed to initialize the Airflow DB."; exit 1; }
-
-# Create Airflow admin user
+echo "[9/10] Initializing Airflow..."
+airflow db migrate
 airflow users create \
   --username admin \
   --firstname Airflow \
   --lastname Admin \
   --role Admin \
   --email airflow_admin@example.com \
-  --password 'StrongPassword123' || { echo "❌ Failed to create Airflow admin user."; exit 1; }
+  --password 'StrongPassword123'
 
-# Set permissions
+echo "🔧 Fixing permissions..."
 sudo chown -R "$USER:$USER" "/home/$USER"
 
-# Create systemd services
+echo "[10/10] Creating Airflow systemd services..."
+
 sudo tee /etc/systemd/system/airflow-webserver.service > /dev/null <<EOF
 [Unit]
 Description=Airflow webserver daemon
@@ -94,6 +93,8 @@ After=network.target
 User=$USER
 Group=$USER
 Environment="AIRFLOW_HOME=$AIRFLOW_HOME"
+Environment="PATH=$VENV_DIR/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin"
+Environment="JAVA_HOME=$JAVA_PATH"
 ExecStart=$VENV_DIR/bin/airflow webserver --port 8080 --host 0.0.0.0
 Restart=always
 RestartSec=5s
@@ -111,6 +112,8 @@ After=network.target
 User=$USER
 Group=$USER
 Environment="AIRFLOW_HOME=$AIRFLOW_HOME"
+Environment="PATH=$VENV_DIR/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin"
+Environment="JAVA_HOME=$JAVA_PATH"
 ExecStart=$VENV_DIR/bin/airflow scheduler
 Restart=always
 RestartSec=5s
@@ -119,26 +122,23 @@ RestartSec=5s
 WantedBy=multi-user.target
 EOF
 
-# Start and enable services
-echo "🔄 Starting Airflow services..."
+echo "🚀 Starting Airflow services..."
 sudo systemctl daemon-reload
 sudo systemctl enable airflow-webserver
 sudo systemctl enable airflow-scheduler
 sudo systemctl start airflow-webserver
 sudo systemctl start airflow-scheduler
 
-# Wait for services to initialize
 sleep 5
 
-# Check service status
 WEB_STATUS=$(systemctl is-active airflow-webserver)
 SCHEDULER_STATUS=$(systemctl is-active airflow-scheduler)
 
 if [[ "$WEB_STATUS" == "active" && "$SCHEDULER_STATUS" == "active" ]]; then
   IP=$(hostname -I | awk '{print $1}')
-  echo "✅ Installation completed successfully. Airflow is available at: http://$IP:8080"
+  echo "✅ Airflow is running at: http://$IP:8080"
 else
-  echo "❌ Installation failed. Check the status of the services below:"
+  echo "❌ Something went wrong. Check the services:"
   SYSTEMD_PAGER=cat sudo systemctl --no-pager status airflow-webserver
   SYSTEMD_PAGER=cat sudo systemctl --no-pager status airflow-scheduler
 fi
