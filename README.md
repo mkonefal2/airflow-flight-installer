@@ -1,4 +1,4 @@
-```markdown
+
 # Airflow Flight Installer
 
 A bash script for automatically installing and configuring Apache Airflow from the `epwa-flight-etl` project ZIP archive.
@@ -24,4 +24,4 @@ sudo ./install_epwa_flight_etl.sh
 
 After successful installation, access the Airflow web UI at:  
 **http://<your_vm_ip>:8080**
-```
+
